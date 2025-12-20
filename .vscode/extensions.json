@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "ms-python.black-formatter", // Black 格式化器
+    "ms-python.python", // Python 扩展
+    "ms-python.vscode-pylance" // Python 语言服务器
+  ]
+}
