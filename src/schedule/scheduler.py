@@ -2,13 +2,17 @@
 任务调度器
 """
 
+import importlib.util
+import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from loguru import logger
 
 from .game_fetcher import GameFetcher
 from .models import GameInfo, Task, TaskStatus
+from src.content_acquisition.acquirer import ContentAcquirer
 
 
 class TaskScheduler:
@@ -16,7 +20,10 @@ class TaskScheduler:
 
     def __init__(self):
         self.game_fetcher = GameFetcher()
+        self.content_acquirer = ContentAcquirer(headless=False)
         self.tasks: Dict[str, Task] = {}  # 任务字典，key为task_id
+        self.task_threads: Dict[str, threading.Thread] = {}  # 任务线程字典，key为task_id
+        self._thread_lock = threading.Lock()  # 线程安全锁
         logger.info("任务调度器初始化完成")
 
     def start_daily_tasks(self) -> List[Task]:
@@ -71,6 +78,7 @@ class TaskScheduler:
             competition_stage_desc=game_data.get("competition_stage_desc")
             or game_data.get("competitionStageDesc", ""),
             match_status=game_data.get("match_status") or game_data.get("matchStatus", ""),
+            match_id=game_data.get("match_id") or game_data.get("matchId", ""),
         )
 
         # 生成任务ID（使用比赛ID作为基础）
@@ -180,3 +188,135 @@ class TaskScheduler:
             if task.game_info.game_id == game_id:
                 return task
         return None
+
+    def execute_task(self, task_id: str):
+        """
+        执行单个任务（在线程中运行）
+        这个方法会被每个任务线程调用
+
+        Args:
+            task_id: 任务ID
+        """
+        task = self.get_task(task_id)
+        if not task:
+            logger.error(f"任务不存在，无法执行: {task_id}")
+            return
+
+        # 检查任务状态，避免重复执行
+        if task.status != TaskStatus.PENDING:
+            logger.warning(
+                f"任务状态不是PENDING，跳过执行: {task_id}, 当前状态: {task.status.value}"
+            )
+            return
+
+        try:
+            # 更新任务状态为运行中
+            self.update_task_status(task_id, TaskStatus.RUNNING)
+            logger.info(
+                f"开始执行任务: {task_id}, 比赛: {task.game_info.away_team_name} vs {task.game_info.home_team_name}"
+            )
+
+            # 1. 内容采集阶段
+            self.update_task_status(task_id, TaskStatus.COLLECTING)
+            logger.info(f"任务 {task_id} 进入内容采集阶段")
+
+            # TODO: 在这里调用内容采集逻辑
+            content = self.content_acquirer.acquire_content(task.game_info)
+            # 模拟采集过程
+            import time
+
+            time.sleep(2)  # 模拟采集耗时
+
+            # 2. 视频生成阶段
+            self.update_task_status(task_id, TaskStatus.GENERATING)
+            logger.info(f"任务 {task_id} 进入视频生成阶段")
+            # TODO: 在这里调用视频生成逻辑
+            # video_path = self.video_maker.generate_video(content)
+            time.sleep(2)  # 模拟生成耗时
+
+            # 3. 视频发布阶段
+            self.update_task_status(task_id, TaskStatus.PUBLISHING)
+            logger.info(f"任务 {task_id} 进入视频发布阶段")
+            # TODO: 在这里调用视频发布逻辑
+            # self.video_publisher.publish_video(video_path, task.game_info)
+            time.sleep(2)  # 模拟发布耗时
+
+            # 任务完成
+            self.update_task_status(task_id, TaskStatus.COMPLETED)
+            logger.info(f"任务执行完成: {task_id}")
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"任务执行失败: {task_id}, 错误: {error_msg}", exc_info=True)
+            self.update_task_status(task_id, TaskStatus.FAILED, error_msg=error_msg)
+        finally:
+            # 清理线程记录
+            with self._thread_lock:
+                self.task_threads.pop(task_id, None)
+            logger.info(f"任务线程结束: {task_id}")
+
+    def start_task_thread(self, task_id: str) -> bool:
+        """
+        为指定任务启动一个线程
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            bool: 是否成功启动线程
+        """
+        task = self.get_task(task_id)
+        if not task:
+            logger.error(f"任务不存在，无法启动线程: {task_id}")
+            return False
+
+        # 检查任务状态
+        if task.status != TaskStatus.PENDING:
+            logger.warning(
+                f"任务状态不是PENDING，无法启动线程: {task_id}, 当前状态: {task.status.value}"
+            )
+            return False
+
+        # 检查是否已有线程在运行
+        with self._thread_lock:
+            if task_id in self.task_threads:
+                thread = self.task_threads[task_id]
+                if thread.is_alive():
+                    logger.warning(f"任务已有线程在运行: {task_id}")
+                    return False
+                else:
+                    # 清理已死亡的线程
+                    self.task_threads.pop(task_id)
+
+            # 创建新线程
+            thread = threading.Thread(
+                target=self.execute_task,
+                args=(task_id,),
+                name=f"TaskThread-{task_id}",
+                daemon=False,  # 设置为非守护线程，确保任务完成
+            )
+            self.task_threads[task_id] = thread
+            thread.start()
+            logger.info(f"为任务启动线程: {task_id}, 线程名: {thread.name}")
+            return True
+
+    def start_all_tasks(self, task_ids: Optional[List[str]] = None) -> int:
+        """
+        为所有待执行的任务启动线程
+        如果指定了task_ids，则只为这些任务启动线程
+
+        Args:
+            task_ids: 可选的任务ID列表，如果为None则启动所有PENDING状态的任务
+
+        Returns:
+            int: 成功启动的线程数量
+        """
+        if task_ids is None:
+            # 获取所有PENDING状态的任务
+            pending_tasks = self.get_tasks_by_status(TaskStatus.PENDING)
+            task_ids = [task.task_id for task in pending_tasks]
+
+        started_count = 0
+        task_ids = task_ids[:1]
+        self.start_task_thread(task_ids[0])
+        return 1

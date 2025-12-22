@@ -21,19 +21,11 @@ def main():
 
     # 打印任务信息
     if tasks:
-        logger.info(f"\n成功创建 {len(tasks)} 个任务:")
-        for task in tasks:
-            logger.info(f"  - {task}")
-            logger.info(
-                f"    比赛: {task.game_info.away_team_name} vs {task.game_info.home_team_name}"
-            )
-            logger.info(f"    状态: {task.status.value}")
+        started_count = scheduler.start_all_tasks()
+        logger.info(f"成功启动 {started_count} 个任务线程")
+
     else:
         logger.warning("未创建任何任务")
-
-    logger.info("=" * 60)
-    logger.info("任务调度完成")
-    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

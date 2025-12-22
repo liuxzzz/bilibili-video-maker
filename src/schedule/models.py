@@ -33,6 +33,7 @@ class GameInfo:
         away_score: str,  # 客队得分
         competition_stage_desc: str,  # 比赛阶段描述
         match_status: str,  # 比赛状态：未开始/进行中/已结束
+        match_id: str,  # 比赛ID
     ):
         self.game_id = game_id
         self.home_team_name = home_team_name
@@ -41,6 +42,7 @@ class GameInfo:
         self.away_score = away_score
         self.competition_stage_desc = competition_stage_desc
         self.match_status = match_status  # 比赛状态：未开始/进行中/已结束
+        self.match_id = match_id
 
     def __repr__(self):
         return (
@@ -59,6 +61,7 @@ class GameInfo:
             "away_score": self.away_score,
             "competition_stage_desc": self.competition_stage_desc,
             "match_status": self.match_status,
+            "match_id": self.match_id,
         }
 
 
