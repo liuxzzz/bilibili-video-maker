@@ -5,4 +5,8 @@
 包括任务生命周期管理、工作流编排、状态监控、异常处理等功能。
 """
 
+from .models import GameInfo, Task, TaskStatus
+from .scheduler import TaskScheduler
+
 __version__ = "0.1.0"
+__all__ = ["TaskScheduler", "Task", "GameInfo", "TaskStatus"]

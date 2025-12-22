@@ -1,0 +1,158 @@
+"""
+NBA比赛信息获取模块
+"""
+
+import json
+import re
+from datetime import datetime
+from typing import Any, List, Optional
+from uuid import uuid4
+
+import requests
+from bs4 import BeautifulSoup
+from loguru import logger
+
+
+class GameFetcher:
+    """比赛信息获取器"""
+
+    def __init__(self):
+        self.base_url = "https://m.hupu.com/nba/schedule"
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            }
+        )
+
+    def get_today_nba_games(self) -> List[dict]:
+        """
+        获取当天NBA比赛信息
+
+        Returns:
+            List[dict]: 比赛信息列表，每个元素包含：
+                - game_id: 唯一标识
+                - home_team: 主队
+                - away_team: 客队
+                - game_date: 比赛日期
+                - game_time: 比赛时间（可选）
+                - status: 比赛状态（可选）
+                - score: 比分（可选）
+                - source_url: 来源URL（可选）
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            logger.info(f"开始获取 {today} 的NBA比赛信息")
+
+            # 尝试从虎扑NBA页面获取比赛信息
+            games = self._fetch_from_hupu()
+
+            if not games:
+                logger.warning("未能从虎扑获取到比赛信息，返回空列表")
+                return []
+
+            print(len(games), "games")
+            # 为每场比赛生成唯一ID
+            for game in games:
+                if "game_id" not in game or not game["game_id"]:
+
+                    game["game_id"] = self._generate_game_id(game, today)
+
+            logger.info(f"成功获取 {len(games)} 场NBA比赛")
+            return games
+
+        except Exception as e:
+            logger.error(f"获取NBA比赛信息失败: {e}")
+            return []
+
+    def _fetch_from_hupu(self) -> List[dict]:
+        """
+        从虎扑网站获取比赛信息
+
+        Returns:
+            List[dict]: 比赛信息列表
+        """
+        try:
+            # 虎扑NBA赛程页面URL
+            url = self.base_url
+            logger.info(f"正在请求: {url}")
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+
+            # 设置正确的编码
+            response.encoding = "utf-8"
+
+            # 解析HTML获取比赛信息
+            games = self._parse_hupu_schedule(response.text)
+
+            return games
+
+        except requests.RequestException as e:
+            logger.error(f"请求虎扑网站失败: {e}")
+            return []
+
+    def _parse_hupu_schedule(self, html: str) -> List[dict]:
+        """
+        解析虎扑赛程页面HTML，提取当天的比赛信息
+
+        Args:
+            html: HTML内容
+
+        Returns:
+            List[dict]: 比赛信息列表
+        """
+
+        try:
+            soup = BeautifulSoup(html, "lxml")
+            games = []
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            # 将日期转换为 20251222这样的格式
+            today = today.replace("-", "")
+
+            # 从soup中获取script标签
+            today_schedule = soup.find("script", id="__NEXT_DATA__", type="application/json")
+            # 从 today_schedule 中提取对象数据
+            today_schedule_data = json.loads(today_schedule.get_text())
+
+            props = today_schedule_data.get("props", {})
+            pageProps = props.get("pageProps", {})
+            gameList = pageProps.get("gameList", [])
+
+            for game in gameList:
+                if game.get("day") == today:
+                    games = game.get("matchList")
+
+            return games
+
+        except Exception as e:
+            logger.error(f"解析HTML失败: {e}")
+            import traceback
+
+            logger.debug(traceback.format_exc())
+            return []
+
+    def _generate_game_id(self, game_info: dict, date: str) -> str:
+        """
+        为比赛生成唯一ID
+
+        Args:
+            game_info: 比赛信息字典
+
+        Returns:
+            str: 唯一标识符
+        """
+        # 使用比赛信息生成唯一ID
+        # 格式: {date}_{home_team}_{away_team}_{uuid}
+        home = game_info.get("homeTeamName", "").replace(" ", "_")
+        away = game_info.get("awayTeamName", "").replace(" ", "_")
+        uuid_part = str(uuid4())[:8]
+
+        game_id = f"{date}_{away}_vs_{home}_{uuid_part}"
+
+        print(game_id, "game_id")
+        return game_id
