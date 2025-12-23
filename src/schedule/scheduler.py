@@ -230,7 +230,7 @@ class TaskScheduler:
             # 2. 视频生成阶段
             self.update_task_status(task_id, TaskStatus.GENERATING)
             logger.info(f"任务 {task_id} 进入视频生成阶段")
-            # TODO: 在这里调用视频生成逻辑
+            # 根据采集来的json来生成视频
             # video_path = self.video_maker.generate_video(content)
             time.sleep(2)  # 模拟生成耗时
 

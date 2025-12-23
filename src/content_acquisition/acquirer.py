@@ -177,17 +177,13 @@ class ContentAcquirer:
                         )
 
                         logger.info(f"成功获取 API 数据，状态码: {response.status_code}")
-                        logger.info(f"返回数据: {data}")
 
                     except Exception as e:
                         logger.error(f"请求修改后的 API 失败: {e}", exc_info=True)
             else:
                 logger.warning("未捕获到目标 API URL")
 
-            time.sleep(300)
-
             return {
-                "content": page.content(),
                 "modified_api_data": modified_api_data,
                 "success": len(modified_api_data) > 0,
             }
