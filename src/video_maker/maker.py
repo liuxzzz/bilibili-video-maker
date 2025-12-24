@@ -45,31 +45,64 @@ class VideoMaker:
 
         logger.info(f"开始处理视频: {video_path}")
 
+        # 用于存储中间文件路径，处理成功后删除
+        intermediate_files = []
+
         try:
             # 1. 裁剪视频前6秒
             trimmed_video_path = self._trim_video(video_path, start_time=6)
             if not trimmed_video_path:
                 logger.error("视频裁剪失败")
                 return None
+            intermediate_files.append(trimmed_video_path)
 
             # 2. 裁切视频，将头部120px的区域裁切掉
             cropped_video_path = self._crop_video(trimmed_video_path, crop_top=120)
             if not cropped_video_path:
                 logger.error("视频裁切失败")
                 return None
+            intermediate_files.append(cropped_video_path)
 
             # 3. 将视频转换为60帧
             processed_video_path = self._convert_to_60fps(cropped_video_path)
             if not processed_video_path:
                 logger.error("视频帧数转换失败")
                 return None
+            intermediate_files.append(processed_video_path)
 
-            logger.info(f"视频处理完成: {processed_video_path}")
-            return str(processed_video_path)
+            # 4. 将音频添加到视频中
+            audio_path = content.get("audio_path") or Path("materials/audio/bgm.mp3")
+            final_video_path = self._add_audio_to_video(processed_video_path, audio_path)
+            if not final_video_path:
+                logger.error("音频合并失败")
+                return None
+
+            # 处理成功，删除中间文件
+            self._cleanup_intermediate_files(intermediate_files)
+
+            logger.info(f"视频处理完成: {final_video_path}")
+            return str(final_video_path)
 
         except Exception as e:
             logger.error(f"视频生成失败: {e}", exc_info=True)
             return None
+
+    def _cleanup_intermediate_files(self, file_paths: list[Path]) -> None:
+        """
+        删除中间处理过程中生成的临时文件
+
+        Args:
+            file_paths: 要删除的文件路径列表
+        """
+        for file_path in file_paths:
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.info(f"已删除中间文件: {file_path}")
+                else:
+                    logger.debug(f"中间文件不存在，跳过删除: {file_path}")
+            except Exception as e:
+                logger.warning(f"删除中间文件失败: {file_path}, 错误: {e}")
 
     def _trim_video(self, input_path: Path, start_time: float = 6.0) -> Optional[Path]:
         """
@@ -244,4 +277,65 @@ class VideoMaker:
             return None
         except Exception as e:
             logger.error(f"视频帧数转换失败: {e}", exc_info=True)
+            return None
+
+    def _add_audio_to_video(self, video_path: Path, audio_path: str | Path) -> Optional[Path]:
+        """
+        将音频添加到视频中
+
+        Args:
+            video_path: 输入视频路径
+            audio_path: 音频文件路径（可以是字符串或 Path 对象）
+
+        Returns:
+            Optional[Path]: 合并后的视频路径，如果失败返回None
+        """
+        try:
+            audio_path = Path(audio_path)
+            if not audio_path.exists():
+                logger.warning(f"音频文件不存在: {audio_path}，跳过音频合并")
+                return video_path
+
+            logger.info(f"开始将音频添加到视频: 视频={video_path}, 音频={audio_path}")
+
+            # 获取视频时长，用于截取音频
+            video_probe = ffmpeg.probe(str(video_path))
+            video_duration = float(video_probe.get("format", {}).get("duration", 0))
+
+            if video_duration == 0:
+                logger.error("无法获取视频时长")
+                return None
+
+            logger.info(f"视频时长: {video_duration} 秒")
+
+            # 生成输出文件路径（移除 _60fps 后缀，添加 _final 后缀）
+            output_path = video_path.parent / f"{video_path.stem.replace('_60fps', '')}_final.mp4"
+
+            # 输入视频和音频
+            video_input = ffmpeg.input(str(video_path))
+            audio_input = ffmpeg.input(str(audio_path), t=video_duration)  # 截取音频到视频时长
+
+            # 合并视频和音频
+            stream = ffmpeg.output(
+                video_input,
+                audio_input,
+                str(output_path),
+                vcodec="copy",  # 视频流直接复制，不重新编码
+                acodec="aac",  # 音频编码为 AAC
+                shortest=None,  # 以最短的流为准（视频或音频）
+            )
+
+            # 执行合并，覆盖已存在的输出文件
+            ffmpeg.run(stream, overwrite_output=True, quiet=True)
+
+            logger.info(f"音频已成功添加到视频: {output_path}")
+            return output_path
+
+        except ffmpeg.Error as e:
+            logger.error(f"FFmpeg 音频合并失败: {e}")
+            if e.stderr:
+                logger.error(f"FFmpeg 错误信息: {e.stderr.decode()}")
+            return None
+        except Exception as e:
+            logger.error(f"音频合并失败: {e}", exc_info=True)
             return None
