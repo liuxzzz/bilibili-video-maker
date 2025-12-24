@@ -13,6 +13,7 @@ from loguru import logger
 from .game_fetcher import GameFetcher
 from .models import GameInfo, Task, TaskStatus
 from src.content_acquisition.acquirer import ContentAcquirer
+from src.video_maker import VideoMaker
 
 
 class TaskScheduler:
@@ -21,6 +22,7 @@ class TaskScheduler:
     def __init__(self):
         self.game_fetcher = GameFetcher()
         self.content_acquirer = ContentAcquirer(headless=False)
+        self.video_maker = VideoMaker()
         self.tasks: Dict[str, Task] = {}  # 任务字典，key为task_id
         self.task_threads: Dict[str, threading.Thread] = {}  # 任务线程字典，key为task_id
         self._thread_lock = threading.Lock()  # 线程安全锁
@@ -222,16 +224,14 @@ class TaskScheduler:
 
             # TODO: 在这里调用内容采集逻辑
             content = self.content_acquirer.acquire_content(task.game_info)
-            # 模拟采集过程
+
             import time
 
-            time.sleep(2)  # 模拟采集耗时
-
-            # 2. 视频生成阶段
+            # 2. 视频处理阶段
             self.update_task_status(task_id, TaskStatus.GENERATING)
             logger.info(f"任务 {task_id} 进入视频生成阶段")
             # 根据采集来的json来生成视频
-            # video_path = self.video_maker.generate_video(content)
+            video_path = self.video_maker.generate_video(content)
             time.sleep(2)  # 模拟生成耗时
 
             # 3. 视频发布阶段

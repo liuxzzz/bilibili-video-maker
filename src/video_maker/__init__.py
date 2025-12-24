@@ -6,3 +6,7 @@
 """
 
 __version__ = "0.1.0"
+
+from .maker import VideoMaker
+
+__all__ = ["VideoMaker"]
