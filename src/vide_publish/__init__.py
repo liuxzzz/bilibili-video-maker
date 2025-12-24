@@ -5,7 +5,8 @@
 包括B站账号管理、自动登录、视频上传、发布信息配置、状态跟踪等功能。
 """
 
-# 标题的生成
-# 简介的生成
-# 标签的生成
 __version__ = "0.1.0"
+
+from .publisher import VideoPublisher
+
+__all__ = ["VideoPublisher"]
