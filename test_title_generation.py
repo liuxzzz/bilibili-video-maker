@@ -1,5 +1,5 @@
 """
-测试视频标题生成功能
+测试视频标题和比赛详细信息生成功能
 
 使用方法：
     python test_title_generation.py
@@ -42,7 +42,7 @@ def test_title_generation():
     publisher = VideoPublisher()
 
     try:
-        # 生成标题
+        # 1. 生成标题
         logger.info("\n开始生成视频标题...")
         title = publisher._generate_video_title(game_info)
 
@@ -57,8 +57,29 @@ def test_title_generation():
             logger.info(f"  标题长度: {len(title)} 字符")
         else:
             logger.error("✗ 标题生成失败：标题为空")
+            return None
 
-        return title
+        # 2. 生成比赛详细信息
+        logger.info("\n" + "=" * 60)
+        logger.info("开始生成比赛详细信息...")
+        logger.info("=" * 60)
+
+        description = publisher._generate_game_description(game_info)
+
+        logger.info("\n" + "=" * 60)
+        logger.info("生成的比赛详细信息:")
+        logger.info(f"  {description}")
+        logger.info("=" * 60)
+
+        # 验证描述格式
+        if description and len(description) > 0:
+            logger.info("✓ 比赛详细信息生成成功")
+            logger.info(f"  描述长度: {len(description)} 字符")
+        else:
+            logger.error("✗ 比赛详细信息生成失败：描述为空")
+            return None
+
+        return {"title": title, "description": description}
 
     except Exception as e:
         logger.error(f"✗ 测试失败: {e}", exc_info=True)
@@ -78,7 +99,11 @@ if __name__ == "__main__":
     result = test_title_generation()
 
     if result:
-        logger.info("\n✓ 测试完成")
+        logger.info("\n" + "=" * 60)
+        logger.info("✓ 测试完成")
+        logger.info("=" * 60)
+        logger.info(f"标题: {result.get('title', 'N/A')}")
+        logger.info(f"描述长度: {len(result.get('description', ''))} 字符")
         sys.exit(0)
     else:
         logger.error("\n✗ 测试失败")

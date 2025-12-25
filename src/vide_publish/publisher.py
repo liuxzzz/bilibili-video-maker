@@ -44,10 +44,10 @@ class VideoPublisher:
             video_title = self._generate_video_title(game_info)
             logger.info(f"生成的视频标题: {video_title}")
 
-            # 2. 生成视频简介
-            video_description = self._generate_video_description(game_info)
-            logger.info(f"生成的视频简介: {video_description}")
-            # 4. 调用B站API上传视频
+            # 2. 生成比赛详细信息（用于视频简介）
+            video_description = self._generate_game_description(game_info)
+            logger.info(f"生成的比赛详细信息: {video_description[:500]}...")  # 只显示前100字符
+            # 3. 调用B站API上传视频
             # 5. 处理上传结果
 
             logger.info("视频发布功能待实现")
@@ -119,3 +119,74 @@ class VideoPublisher:
             )
             logger.warning(f"使用默认标题: {default_title}")
             return default_title
+
+    def _generate_game_description(self, game_info: GameInfo) -> str:
+        """
+        生成比赛详细信息
+
+        用于视频简介，包含比赛的详细描述、关键时刻、球员表现等。
+
+        Args:
+            game_info: 比赛信息
+
+        Returns:
+            str: 生成的比赛详细信息
+        """
+        try:
+            # 构造提示词，只提供比赛标识信息，让模型自己搜索详细信息
+            system_prompt = """你是一个专业的体育比赛分析助手。你需要根据比赛信息生成详细的比赛描述。
+
+描述要求：
+1. 开头简要介绍比赛双方和比赛结果
+2. 详细描述比赛的关键时刻和亮点
+3. 介绍主要球员的表现和数据
+4. 分析比赛的转折点和精彩瞬间
+5. 结尾可以总结比赛的意义或影响
+
+描述应该：
+- 详细且生动，能够吸引观众
+- 包含具体的比分、数据等信息
+- 语言流畅，适合作为视频简介
+- 长度控制在200-500字左右
+
+请只返回描述内容，不要包含其他说明文字。"""
+
+            user_prompt = f"""请为以下NBA比赛生成详细的比赛描述：
+
+比赛：{game_info.away_team_name} vs {game_info.home_team_name}
+
+请搜索这场比赛的最新信息（包括比分、胜负关系、球员表现、比赛亮点、关键时刻等），然后生成一份详细的比赛描述，用于视频简介。"""
+
+            description = call_llm(
+                user_content=user_prompt,
+                system_content=system_prompt,
+                enable_search=True,  # 启用搜索功能，让模型自己查找比赛信息
+            )
+
+            # 清理描述（移除可能的引号、多余换行等）
+            description = description.strip().strip('"').strip("'").strip()
+            # 移除可能的"描述："等前缀
+            if "描述：" in description:
+                description = description.split("描述：", 1)[-1]
+            if "描述:" in description:
+                description = description.split("描述:", 1)[-1]
+            if "简介：" in description:
+                description = description.split("简介：", 1)[-1]
+            if "简介:" in description:
+                description = description.split("简介:", 1)[-1]
+
+            logger.info(f"成功生成比赛详细信息，长度: {len(description)} 字符")
+            return description
+
+        except Exception as e:
+            logger.error(f"生成比赛详细信息失败: {e}", exc_info=True)
+            # 如果生成失败，返回一个简单的默认描述
+            home_score = game_info.home_score if game_info.home_score else "0"
+            away_score = game_info.away_score if game_info.away_score else "0"
+            default_description = (
+                f"本场比赛是 {game_info.away_team_name} 对阵 {game_info.home_team_name} 的精彩对决。"
+                f"最终比分为 {game_info.away_team_name} {away_score}-{home_score} {game_info.home_team_name}。"
+                f"比赛阶段：{game_info.competition_stage_desc}。"
+            )
+            logger.warning(f"使用默认描述")
+            return default_description
