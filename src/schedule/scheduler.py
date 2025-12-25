@@ -3,7 +3,6 @@
 """
 
 import importlib.util
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,8 +25,6 @@ class TaskScheduler:
         self.video_maker = VideoMaker()
         self.video_publisher = VideoPublisher()
         self.tasks: Dict[str, Task] = {}  # 任务字典，key为task_id
-        self.task_threads: Dict[str, threading.Thread] = {}  # 任务线程字典，key为task_id
-        self._thread_lock = threading.Lock()  # 线程安全锁
         logger.info("任务调度器初始化完成")
 
     def start_daily_tasks(self) -> List[Task]:
@@ -43,7 +40,7 @@ class TaskScheduler:
         # 1. 获取当天NBA比赛
         games_data = self.game_fetcher.get_today_nba_games()
         if not games_data:
-            logger.warning("未获取到任何比赛信息，任务流程结束")
+            logger.warning("当日没有比赛，任务流程结束")
             return []
 
         # 2. 为每场比赛创建任务
@@ -195,8 +192,7 @@ class TaskScheduler:
 
     def execute_task(self, task_id: str):
         """
-        执行单个任务（在线程中运行）
-        这个方法会被每个任务线程调用
+        执行单个任务（单线程顺序执行）
 
         Args:
             task_id: 任务ID
@@ -253,73 +249,55 @@ class TaskScheduler:
             logger.error(f"任务执行失败: {task_id}, 错误: {error_msg}", exc_info=True)
             self.update_task_status(task_id, TaskStatus.FAILED, error_msg=error_msg)
         finally:
-            # 清理线程记录
-            with self._thread_lock:
-                self.task_threads.pop(task_id, None)
-            logger.info(f"任务线程结束: {task_id}")
+            logger.info(f"任务执行结束: {task_id}")
 
-    def start_task_thread(self, task_id: str) -> bool:
+    def start_task(self, task_id: str) -> bool:
         """
-        为指定任务启动一个线程
+        执行指定任务（单线程顺序执行）
 
         Args:
             task_id: 任务ID
 
         Returns:
-            bool: 是否成功启动线程
+            bool: 是否成功开始执行任务
         """
         task = self.get_task(task_id)
         if not task:
-            logger.error(f"任务不存在，无法启动线程: {task_id}")
+            logger.error(f"任务不存在，无法执行: {task_id}")
             return False
 
         # 检查任务状态
         if task.status != TaskStatus.PENDING:
             logger.warning(
-                f"任务状态不是PENDING，无法启动线程: {task_id}, 当前状态: {task.status.value}"
+                f"任务状态不是PENDING，无法执行: {task_id}, 当前状态: {task.status.value}"
             )
             return False
 
-        # 检查是否已有线程在运行
-        with self._thread_lock:
-            if task_id in self.task_threads:
-                thread = self.task_threads[task_id]
-                if thread.is_alive():
-                    logger.warning(f"任务已有线程在运行: {task_id}")
-                    return False
-                else:
-                    # 清理已死亡的线程
-                    self.task_threads.pop(task_id)
-
-            # 创建新线程
-            thread = threading.Thread(
-                target=self.execute_task,
-                args=(task_id,),
-                name=f"TaskThread-{task_id}",
-                daemon=False,  # 设置为非守护线程，确保任务完成
-            )
-            self.task_threads[task_id] = thread
-            thread.start()
-            logger.info(f"为任务启动线程: {task_id}, 线程名: {thread.name}")
-            return True
+        # 直接执行任务（单线程顺序执行）
+        logger.info(f"开始执行任务: {task_id}")
+        self.execute_task(task_id)
+        return True
 
     def start_all_tasks(self, task_ids: Optional[List[str]] = None) -> int:
         """
-        为所有待执行的任务启动线程
-        如果指定了task_ids，则只为这些任务启动线程
+        顺序执行所有待执行的任务（单线程）
+        如果指定了task_ids，则只为这些任务执行
 
         Args:
-            task_ids: 可选的任务ID列表，如果为None则启动所有PENDING状态的任务
+            task_ids: 可选的任务ID列表，如果为None则执行所有PENDING状态的任务
 
         Returns:
-            int: 成功启动的线程数量
+            int: 成功执行的任务数量
         """
         if task_ids is None:
             # 获取所有PENDING状态的任务
             pending_tasks = self.get_tasks_by_status(TaskStatus.PENDING)
             task_ids = [task.task_id for task in pending_tasks]
 
-        started_count = 0
-        task_ids = task_ids[:1]
-        self.start_task_thread(task_ids[0])
-        return 1
+        executed_count = 0
+        for task_id in task_ids:
+            logger.info(f"准备执行任务: {task_id} ({executed_count + 1}/{len(task_ids)})")
+            if self.start_task(task_id):
+                executed_count += 1
+            logger.info(f"任务 {task_id} 执行完成，继续下一个任务...")
+        return executed_count

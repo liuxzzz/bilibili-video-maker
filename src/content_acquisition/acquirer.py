@@ -6,7 +6,6 @@
 
 import time
 import os
-import threading
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -33,9 +32,6 @@ class ContentAcquirer:
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
-        self._lock = threading.Lock()
-        self._playwright_thread: Optional[threading.Thread] = None
-        self._use_thread = False  # 标记是否使用线程模式
         logger.info(f"内容采集器初始化完成 (headless={headless})")
 
     def acquire_content(
