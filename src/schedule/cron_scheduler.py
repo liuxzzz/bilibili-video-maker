@@ -143,33 +143,59 @@ class CronScheduler:
         logger.info("=" * 80)
 
         # 添加每日12:00的定时任务
-        self.scheduler.add_job(
+        daily_job = self.scheduler.add_job(
             self.daily_check_job,
             trigger=CronTrigger(hour=12, minute=0),
             id="daily_check",
             name="每日比赛检查",
             replace_existing=True,
         )
-        logger.info("已添加定时任务: 每日12:00执行比赛检查")
+        logger.info("✅ 已添加定时任务: 每日12:00执行比赛检查")
+
+        # 显示下次执行时间
+        next_run_time = daily_job.next_run_time
+        if next_run_time:
+            logger.info(f"📅 下次每日检查时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # 添加每小时的检查任务
-        self.scheduler.add_job(
+        hourly_job = self.scheduler.add_job(
             self.hourly_check_job,
             trigger=IntervalTrigger(hours=1),
             id="hourly_check",
             name="每小时状态检查",
             replace_existing=True,
         )
-        logger.info("已添加定时任务: 每小时执行状态检查")
+        logger.info("✅ 已添加定时任务: 每小时执行状态检查")
+
+        # 显示下次执行时间
+        next_hourly_run = hourly_job.next_run_time
+        if next_hourly_run:
+            logger.info(f"⏰ 下次每小时检查时间: {next_hourly_run.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # 立即执行一次每日检查（用于测试和启动时的初始化）
-        logger.info("启动时执行一次每日检查任务...")
+        logger.info("")
+        logger.info("🚀 启动时立即执行一次每日检查任务...")
+        logger.info("")
         self.daily_check_job()
 
-        logger.info("定时任务调度器启动成功，等待执行定时任务...")
-        logger.info("按 Ctrl+C 停止")
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("✅ 定时任务调度器启动成功！")
+        logger.info("=" * 80)
+        logger.info("📋 定时任务列表:")
+        logger.info("   1. 每日12:00 - 检查当天NBA比赛并创建任务")
+        logger.info("   2. 每小时 - 检查等待中的任务状态")
+        logger.info("")
+        logger.info("💡 程序将持续运行，直到手动停止（Ctrl+C）")
+        logger.info("=" * 80)
+        logger.info("")
 
         try:
+            # 使用BlockingScheduler，程序会持续运行
             self.scheduler.start()
         except (KeyboardInterrupt, SystemExit):
-            logger.info("定时任务调度器已停止")
+            logger.info("")
+            logger.info("=" * 80)
+            logger.info("⏹️  定时任务调度器已停止")
+            logger.info("=" * 80)
+            self.scheduler.shutdown()
