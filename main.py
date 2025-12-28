@@ -1,18 +1,22 @@
 """
 主程序入口
+支持两种运行模式：
+1. 一次性运行模式（默认）
+2. 定时任务模式（使用 --cron 参数）
 """
 
+import argparse
 from pathlib import Path
 
 from loguru import logger
 
-from src.schedule import TaskScheduler
+from src.schedule import TaskScheduler, CronScheduler
 
 
-def main():
-    """主函数"""
+def run_once():
+    """一次性运行模式 - 立即获取当天比赛并执行"""
     logger.info("=" * 60)
-    logger.info("B站视频制作发布系统启动")
+    logger.info("B站视频制作发布系统启动 - 一次性运行模式")
     logger.info("=" * 60)
 
     # 创建任务调度器
@@ -45,6 +49,29 @@ def main():
         logger.info(f"已清理 videos 目录，共删除 {deleted_count} 个文件")
     else:
         logger.warning(f"videos 目录不存在: {videos_dir}")
+
+
+def run_cron():
+    """定时任务模式 - 每天12点检查，每小时重试"""
+    cron_scheduler = CronScheduler()
+    cron_scheduler.start()
+
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description="B站视频制作发布系统")
+    parser.add_argument(
+        "--cron",
+        action="store_true",
+        help="启用定时任务模式（每天12:00检查比赛，每小时重试未完成比赛）",
+    )
+
+    args = parser.parse_args()
+
+    if args.cron:
+        run_cron()
+    else:
+        run_once()
 
 
 if __name__ == "__main__":

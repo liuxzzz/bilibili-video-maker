@@ -156,3 +156,57 @@ class GameFetcher:
 
         print(game_id, "game_id")
         return game_id
+
+    def get_game_status(self, match_id: str) -> Optional[str]:
+        """
+        获取指定比赛的当前状态
+
+        Args:
+            match_id: 比赛ID (data-match属性值)
+
+        Returns:
+            Optional[str]: 比赛状态 - "未开始"/"进行中"/"已结束"，获取失败返回None
+        """
+        try:
+            url = self.base_url
+            logger.info(f"正在获取比赛 {match_id} 的状态，请求URL: {url}")
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            response.encoding = "utf-8"
+
+            soup = BeautifulSoup(response.text, "lxml")
+
+            # 查找指定match_id的比赛元素
+            match_element = soup.find("div", {"class": "match-item", "data-match": match_id})
+
+            if not match_element:
+                logger.warning(f"未找到比赛ID为 {match_id} 的元素")
+                return None
+
+            # 在比赛元素内查找状态信息
+            # 状态结构: <div class="mend"><span class="text-m-bold">未开始</span></div>
+            status_element = match_element.find("div", {"class": "mend"})
+
+            if not status_element:
+                logger.warning(f"比赛 {match_id} 未找到状态元素")
+                return None
+
+            # 提取状态文本
+            status_span = status_element.find("span", {"class": "text-m-bold"})
+            if status_span:
+                status = status_span.get_text(strip=True)
+                logger.info(f"比赛 {match_id} 当前状态: {status}")
+                return status
+            else:
+                logger.warning(f"比赛 {match_id} 状态元素中未找到span标签")
+                return None
+
+        except requests.RequestException as e:
+            logger.error(f"获取比赛状态失败 (网络错误): {e}")
+            return None
+        except Exception as e:
+            logger.error(f"获取比赛状态失败: {e}")
+            import traceback
+
+            logger.debug(traceback.format_exc())
+            return None

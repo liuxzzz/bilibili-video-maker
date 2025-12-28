@@ -77,6 +77,7 @@ name = "bilibili-video-maker"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "apscheduler" },
     { name = "beautifulsoup4" },
     { name = "bilibili-api-python" },
     { name = "black" },
@@ -95,6 +96,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "apscheduler", specifier = ">=3.10.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "bilibili-api-python", specifier = ">=17.4.1" },
     { name = "black", specifier = ">=24.0.0" },

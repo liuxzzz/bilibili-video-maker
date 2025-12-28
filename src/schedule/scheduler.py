@@ -3,7 +3,7 @@
 """
 
 import importlib.util
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -11,6 +11,7 @@ from loguru import logger
 
 from .game_fetcher import GameFetcher
 from .models import GameInfo, Task, TaskStatus
+from .task_store import TaskStore
 from src.content_acquisition.acquirer import ContentAcquirer
 from src.video_maker import VideoMaker
 from src.vide_publish import VideoPublisher
@@ -24,13 +25,13 @@ class TaskScheduler:
         self.content_acquirer = ContentAcquirer(headless=False)
         self.video_maker = VideoMaker()
         self.video_publisher = VideoPublisher()
-        self.tasks: Dict[str, Task] = {}  # 任务字典，key为task_id
+        self.task_store = TaskStore()  # 使用持久化存储
         logger.info("任务调度器初始化完成")
 
     def start_daily_tasks(self) -> List[Task]:
         """
         启动每日任务流程
-        获取当天NBA比赛，为每场比赛创建任务
+        获取当天NBA比赛，为每场比赛创建任务并检查状态
 
         Returns:
             List[Task]: 创建的任务列表
@@ -43,14 +44,56 @@ class TaskScheduler:
             logger.warning("当日没有比赛，任务流程结束")
             return []
 
-        # 2. 为每场比赛创建任务
+        # 2. 为每场比赛创建任务并检查状态
         tasks = []
         for game_data in games_data:
             try:
+                match_id = game_data.get("matchId") or game_data.get("match_id", "")
 
+                # 检查是否已存在该比赛的任务（避免重复创建）
+                existing_tasks = self.task_store.get_tasks_by_match_id(match_id)
+                if existing_tasks:
+                    # 过滤出未完成的任务
+                    incomplete_tasks = [
+                        t
+                        for t in existing_tasks
+                        if t.status
+                        not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+                    ]
+                    if incomplete_tasks:
+                        logger.info(f"比赛 {match_id} 已存在未完成任务，跳过创建")
+                        tasks.extend(incomplete_tasks)
+                        continue
+
+                # 创建任务
                 task = self.create_task_from_game(game_data)
+
+                # 检查比赛状态
+                game_status = self.game_fetcher.get_game_status(match_id)
+
+                if game_status == "已结束":
+                    # 比赛已结束，标记为待执行
+                    logger.info(f"比赛 {match_id} 已结束，任务可以执行")
+                    task.status = TaskStatus.PENDING
+                elif game_status in ["未开始", "进行中"]:
+                    # 比赛未结束，标记为等待状态，并设置1小时后重新检查
+                    logger.info(f"比赛 {match_id} 状态为 {game_status}，设置为等待状态")
+                    task.status = TaskStatus.WAITING_GAME_END
+                    next_check = datetime.now() + timedelta(hours=1)
+                    task.config["next_check_time"] = next_check.isoformat()
+                    task.config["game_status"] = game_status
+                else:
+                    # 无法获取状态，保守处理：设置为等待状态
+                    logger.warning(f"比赛 {match_id} 状态未知，设置为等待状态")
+                    task.status = TaskStatus.WAITING_GAME_END
+                    next_check = datetime.now() + timedelta(hours=1)
+                    task.config["next_check_time"] = next_check.isoformat()
+
+                # 保存任务到持久化存储
+                self.task_store.save_task(task)
                 tasks.append(task)
                 logger.info(f"为比赛创建任务: {task}")
+
             except Exception as e:
                 logger.error(f"创建任务失败: {e}, 比赛信息: {game_data}")
 
@@ -93,9 +136,6 @@ class TaskScheduler:
             create_time=datetime.now(),
         )
 
-        # 保存任务
-        self.tasks[task_id] = task
-
         logger.info(f"创建任务成功: task_id={task_id}, game_id={game_info.game_id}")
         return task
 
@@ -124,9 +164,15 @@ class TaskScheduler:
         Returns:
             Optional[Task]: 任务对象，如果不存在返回None
         """
-        return self.tasks.get(task_id)
+        return self.task_store.get_task(task_id)
 
-    def update_task_status(self, task_id: str, status: TaskStatus, error_msg: Optional[str] = None):
+    def update_task_status(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        error_msg: Optional[str] = None,
+        next_check_time: Optional[datetime] = None,
+    ):
         """
         更新任务状态
 
@@ -134,25 +180,9 @@ class TaskScheduler:
             task_id: 任务ID
             status: 新状态
             error_msg: 错误信息（如果有）
+            next_check_time: 下次检查时间
         """
-        task = self.tasks.get(task_id)
-        if not task:
-            logger.warning(f"任务不存在: {task_id}")
-            return
-
-        old_status = task.status
-        task.status = status
-
-        if status == TaskStatus.RUNNING and not task.start_time:
-            task.start_time = datetime.now()
-
-        if status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
-            task.end_time = datetime.now()
-
-        if error_msg:
-            task.error_msg = error_msg
-
-        logger.info(f"任务状态更新: task_id={task_id}, " f"{old_status.value} -> {status.value}")
+        self.task_store.update_task_status(task_id, status, error_msg, next_check_time)
 
     def get_all_tasks(self) -> List[Task]:
         """
@@ -161,7 +191,7 @@ class TaskScheduler:
         Returns:
             List[Task]: 任务列表
         """
-        return list(self.tasks.values())
+        return self.task_store.get_all_tasks()
 
     def get_tasks_by_status(self, status: TaskStatus) -> List[Task]:
         """
@@ -173,7 +203,7 @@ class TaskScheduler:
         Returns:
             List[Task]: 任务列表
         """
-        return [task for task in self.tasks.values() if task.status == status]
+        return self.task_store.get_tasks_by_status(status)
 
     def get_task_by_game_id(self, game_id: str) -> Optional[Task]:
         """
@@ -185,10 +215,79 @@ class TaskScheduler:
         Returns:
             Optional[Task]: 任务对象，如果不存在返回None
         """
-        for task in self.tasks.values():
+        tasks = self.get_all_tasks()
+        for task in tasks:
             if task.game_info.game_id == game_id:
                 return task
         return None
+
+    def check_waiting_tasks(self) -> List[Task]:
+        """
+        检查所有等待中的任务，看是否到了重新检查的时间
+
+        Returns:
+            List[Task]: 需要重新检查的任务列表
+        """
+        logger.info("开始检查等待中的任务")
+
+        waiting_tasks = self.task_store.get_tasks_by_status(TaskStatus.WAITING_GAME_END)
+        tasks_to_check = []
+        current_time = datetime.now()
+
+        for task in waiting_tasks:
+            next_check_time_str = task.config.get("next_check_time")
+            if not next_check_time_str:
+                logger.warning(f"任务 {task.task_id} 缺少next_check_time，跳过")
+                continue
+
+            try:
+                next_check_time = datetime.fromisoformat(next_check_time_str)
+                if current_time >= next_check_time:
+                    logger.info(f"任务 {task.task_id} 到达检查时间")
+                    tasks_to_check.append(task)
+                else:
+                    remaining = (next_check_time - current_time).total_seconds() / 60
+                    logger.debug(f"任务 {task.task_id} 还需等待 {remaining:.1f} 分钟")
+            except Exception as e:
+                logger.error(f"解析任务 {task.task_id} 的检查时间失败: {e}")
+
+        logger.info(f"找到 {len(tasks_to_check)} 个需要检查的任务")
+        return tasks_to_check
+
+    def recheck_game_status_and_update(self, task: Task) -> bool:
+        """
+        重新检查比赛状态并更新任务
+
+        Args:
+            task: 任务对象
+
+        Returns:
+            bool: 比赛是否已结束
+        """
+        match_id = task.game_info.match_id
+        logger.info(f"重新检查比赛 {match_id} 的状态")
+
+        game_status = self.game_fetcher.get_game_status(match_id)
+
+        if game_status == "已结束":
+            logger.info(f"比赛 {match_id} 已结束，任务转为待执行状态")
+            self.task_store.update_task_status(task.task_id, TaskStatus.PENDING)
+            return True
+        elif game_status in ["未开始", "进行中"]:
+            logger.info(f"比赛 {match_id} 仍在进行或未开始（状态：{game_status}），继续等待")
+            # 设置下次检查时间（1小时后）
+            next_check = datetime.now() + timedelta(hours=1)
+            task.config["game_status"] = game_status
+            task.config["next_check_time"] = next_check.isoformat()
+            self.task_store.save_task(task)
+            return False
+        else:
+            logger.warning(f"比赛 {match_id} 状态未知，继续等待")
+            # 无法获取状态，1小时后再试
+            next_check = datetime.now() + timedelta(hours=1)
+            task.config["next_check_time"] = next_check.isoformat()
+            self.task_store.save_task(task)
+            return False
 
     def execute_task(self, task_id: str):
         """

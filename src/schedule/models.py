@@ -12,6 +12,7 @@ class TaskStatus(str, Enum):
     """任务状态枚举"""
 
     PENDING = "pending"  # 待执行
+    WAITING_GAME_END = "waiting_game_end"  # 等待比赛结束
     RUNNING = "running"  # 执行中
     COLLECTING = "collecting"  # 采集中
     GENERATING = "generating"  # 生成中
