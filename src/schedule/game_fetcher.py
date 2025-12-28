@@ -157,15 +157,17 @@ class GameFetcher:
         print(game_id, "game_id")
         return game_id
 
-    def get_game_status(self, match_id: str) -> Optional[str]:
+    def get_game_status(self, match_id: str) -> Optional[dict]:
         """
-        获取指定比赛的当前状态
+        获取指定比赛的当前状态和评分数量
 
         Args:
             match_id: 比赛ID (data-match属性值)
 
         Returns:
-            Optional[str]: 比赛状态 - "未开始"/"进行中"/"已结束"，获取失败返回None
+            Optional[dict]: 包含以下字段的字典，获取失败返回None:
+                - status: 比赛状态 - "未开始"/"进行中"/"已结束"
+                - rating_count: 评分数量（整数），如果无法解析返回0
         """
         try:
             url = self.base_url
@@ -184,7 +186,7 @@ class GameFetcher:
                 return None
 
             # 在比赛元素内查找状态信息
-            # 状态结构: <div class="mend"><span class="text-m-bold">未开始</span></div>
+            # 状态结构: <div class="mend"><span class="text-m-bold">已结束</span><a>4.4万评分</a></div>
             status_element = match_element.find("div", {"class": "mend"})
 
             if not status_element:
@@ -193,13 +195,26 @@ class GameFetcher:
 
             # 提取状态文本
             status_span = status_element.find("span", {"class": "text-m-bold"})
-            if status_span:
-                status = status_span.get_text(strip=True)
-                logger.info(f"比赛 {match_id} 当前状态: {status}")
-                return status
-            else:
+            if not status_span:
                 logger.warning(f"比赛 {match_id} 状态元素中未找到span标签")
                 return None
+
+            status = status_span.get_text(strip=True)
+
+            # 提取评分数量
+            rating_count = 0
+            rating_link = status_element.find("a")
+            if rating_link:
+                rating_text = rating_link.get_text(strip=True)
+                # 解析评分数量（如 "4.4万评分" -> 44000）
+                rating_count = self._parse_rating_count(rating_text)
+                logger.info(f"比赛 {match_id} 评分数量: {rating_count}")
+            else:
+                logger.debug(f"比赛 {match_id} 未找到评分信息")
+
+            result = {"status": status, "rating_count": rating_count}
+            logger.info(f"比赛 {match_id} 当前状态: {status}, 评分数量: {rating_count}")
+            return result
 
         except requests.RequestException as e:
             logger.error(f"获取比赛状态失败 (网络错误): {e}")
@@ -210,3 +225,31 @@ class GameFetcher:
 
             logger.debug(traceback.format_exc())
             return None
+
+    def _parse_rating_count(self, rating_text: str) -> int:
+        """
+        解析评分数量文本，转换为整数
+
+        Args:
+            rating_text: 评分文本，如 "4.4万评分", "10.2万评分", "1234评分"
+
+        Returns:
+            int: 评分数量（整数）
+        """
+        try:
+            # 移除"评分"字样
+            rating_text = rating_text.replace("评分", "").strip()
+
+            # 处理"万"单位
+            if "万" in rating_text:
+                # 提取数字部分（如 "4.4万" -> "4.4"）
+                number_str = rating_text.replace("万", "").strip()
+                number = float(number_str)
+                # 转换为实际数量（乘以10000）
+                return int(number * 10000)
+            else:
+                # 没有单位，直接转换为整数
+                return int(float(rating_text))
+        except Exception as e:
+            logger.warning(f"解析评分数量失败: {rating_text}, 错误: {e}")
+            return 0

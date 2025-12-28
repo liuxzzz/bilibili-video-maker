@@ -68,26 +68,57 @@ class TaskScheduler:
                 # 创建任务
                 task = self.create_task_from_game(game_data)
 
-                # 检查比赛状态
-                game_status = self.game_fetcher.get_game_status(match_id)
+                # 检查比赛状态和评分数量
+                game_status_info = self.game_fetcher.get_game_status(match_id)
+
+                if not game_status_info:
+                    # 无法获取状态信息，保守处理：设置为等待状态
+                    logger.warning(f"比赛 {match_id} 无法获取状态信息，设置为等待状态")
+                    task.status = TaskStatus.WAITING_GAME_END
+                    next_check = datetime.now() + timedelta(hours=1)
+                    task.config["next_check_time"] = next_check.isoformat()
+                    self.task_store.save_task(task)
+                    tasks.append(task)
+                    continue
+
+                game_status = game_status_info.get("status", "")
+                rating_count = game_status_info.get("rating_count", 0)
+
+                # 更新任务中的比赛评分数量
+                task.game_info.rating_count = rating_count
 
                 if game_status == "已结束":
-                    # 比赛已结束，标记为待执行
-                    logger.info(f"比赛 {match_id} 已结束，任务可以执行")
-                    task.status = TaskStatus.PENDING
+                    # 比赛已结束，检查评分数量
+                    if rating_count >= 100000:
+                        logger.info(
+                            f"比赛 {match_id} 已结束且评分数量({rating_count})>=10万，任务可以执行"
+                        )
+                        task.status = TaskStatus.PENDING
+                    else:
+                        logger.info(
+                            f"比赛 {match_id} 已结束但评分数量({rating_count})<10万，跳过任务创建"
+                        )
+                        # 不保存任务，直接跳过
+                        continue
                 elif game_status in ["未开始", "进行中"]:
                     # 比赛未结束，标记为等待状态，并设置1小时后重新检查
-                    logger.info(f"比赛 {match_id} 状态为 {game_status}，设置为等待状态")
+                    logger.info(
+                        f"比赛 {match_id} 状态为 {game_status}，评分数量: {rating_count}，设置为等待状态"
+                    )
                     task.status = TaskStatus.WAITING_GAME_END
                     next_check = datetime.now() + timedelta(hours=1)
                     task.config["next_check_time"] = next_check.isoformat()
                     task.config["game_status"] = game_status
+                    task.config["rating_count"] = rating_count
                 else:
                     # 无法获取状态，保守处理：设置为等待状态
-                    logger.warning(f"比赛 {match_id} 状态未知，设置为等待状态")
+                    logger.warning(
+                        f"比赛 {match_id} 状态未知，评分数量: {rating_count}，设置为等待状态"
+                    )
                     task.status = TaskStatus.WAITING_GAME_END
                     next_check = datetime.now() + timedelta(hours=1)
                     task.config["next_check_time"] = next_check.isoformat()
+                    task.config["rating_count"] = rating_count
 
                 # 保存任务到持久化存储
                 self.task_store.save_task(task)
@@ -262,19 +293,48 @@ class TaskScheduler:
             task: 任务对象
 
         Returns:
-            bool: 比赛是否已结束
+            bool: 比赛是否已结束且满足评分条件
         """
         match_id = task.game_info.match_id
         logger.info(f"重新检查比赛 {match_id} 的状态")
 
-        game_status = self.game_fetcher.get_game_status(match_id)
+        game_status_info = self.game_fetcher.get_game_status(match_id)
+
+        if not game_status_info:
+            logger.warning(f"比赛 {match_id} 无法获取状态信息，继续等待")
+            # 无法获取状态，1小时后再试
+            next_check = datetime.now() + timedelta(hours=1)
+            task.config["next_check_time"] = next_check.isoformat()
+            self.task_store.save_task(task)
+            return False
+
+        game_status = game_status_info.get("status", "")
+        rating_count = game_status_info.get("rating_count", 0)
+
+        # 更新任务中的评分数量
+        task.game_info.rating_count = rating_count
+        task.config["rating_count"] = rating_count
 
         if game_status == "已结束":
-            logger.info(f"比赛 {match_id} 已结束，任务转为待执行状态")
-            self.task_store.update_task_status(task.task_id, TaskStatus.PENDING)
-            return True
+            # 比赛已结束，检查评分数量
+            if rating_count >= 100000:
+                logger.info(
+                    f"比赛 {match_id} 已结束且评分数量({rating_count})>=10万，任务转为待执行状态"
+                )
+                self.task_store.update_task_status(task.task_id, TaskStatus.PENDING)
+                return True
+            else:
+                logger.info(f"比赛 {match_id} 已结束但评分数量({rating_count})<10万，继续等待")
+                # 设置下次检查时间（1小时后），继续等待评分数量增长
+                next_check = datetime.now() + timedelta(hours=1)
+                task.config["game_status"] = game_status
+                task.config["next_check_time"] = next_check.isoformat()
+                self.task_store.save_task(task)
+                return False
         elif game_status in ["未开始", "进行中"]:
-            logger.info(f"比赛 {match_id} 仍在进行或未开始（状态：{game_status}），继续等待")
+            logger.info(
+                f"比赛 {match_id} 仍在进行或未开始（状态：{game_status}），评分数量: {rating_count}，继续等待"
+            )
             # 设置下次检查时间（1小时后）
             next_check = datetime.now() + timedelta(hours=1)
             task.config["game_status"] = game_status
@@ -282,7 +342,7 @@ class TaskScheduler:
             self.task_store.save_task(task)
             return False
         else:
-            logger.warning(f"比赛 {match_id} 状态未知，继续等待")
+            logger.warning(f"比赛 {match_id} 状态未知，评分数量: {rating_count}，继续等待")
             # 无法获取状态，1小时后再试
             next_check = datetime.now() + timedelta(hours=1)
             task.config["next_check_time"] = next_check.isoformat()
