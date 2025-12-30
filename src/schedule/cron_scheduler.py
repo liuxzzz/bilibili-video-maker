@@ -3,7 +3,7 @@
 使用APScheduler实现定时任务
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -143,34 +143,46 @@ class CronScheduler:
         logger.info("=" * 80)
 
         # 添加每日12:00的定时任务
-        daily_job = self.scheduler.add_job(
+        daily_trigger = CronTrigger(hour=12, minute=0)
+        self.scheduler.add_job(
             self.daily_check_job,
-            trigger=CronTrigger(hour=12, minute=0),
+            trigger=daily_trigger,
             id="daily_check",
             name="每日比赛检查",
             replace_existing=True,
         )
         logger.info("✅ 已添加定时任务: 每日12:00执行比赛检查")
 
-        # 显示下次执行时间
-        next_run_time = daily_job.next_run_time
-        if next_run_time:
-            logger.info(f"📅 下次每日检查时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        # 计算并显示下次执行时间
+        try:
+            now = datetime.now(timezone.utc)
+            next_run_time = daily_trigger.get_next_fire_time(None, now)
+            if next_run_time:
+                logger.info(f"📅 下次每日检查时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception as e:
+            logger.debug(f"无法获取下次执行时间: {e}")
 
         # 添加每小时的检查任务
-        hourly_job = self.scheduler.add_job(
+        hourly_trigger = IntervalTrigger(hours=1)
+        self.scheduler.add_job(
             self.hourly_check_job,
-            trigger=IntervalTrigger(hours=1),
+            trigger=hourly_trigger,
             id="hourly_check",
             name="每小时状态检查",
             replace_existing=True,
         )
         logger.info("✅ 已添加定时任务: 每小时执行状态检查")
 
-        # 显示下次执行时间
-        next_hourly_run = hourly_job.next_run_time
-        if next_hourly_run:
-            logger.info(f"⏰ 下次每小时检查时间: {next_hourly_run.strftime('%Y-%m-%d %H:%M:%S')}")
+        # 计算并显示下次执行时间
+        try:
+            now = datetime.now(timezone.utc)
+            next_hourly_run = hourly_trigger.get_next_fire_time(None, now)
+            if next_hourly_run:
+                logger.info(
+                    f"⏰ 下次每小时检查时间: {next_hourly_run.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+        except Exception as e:
+            logger.debug(f"无法获取下次执行时间: {e}")
 
         # 立即执行一次每日检查（用于测试和启动时的初始化）
         logger.info("")

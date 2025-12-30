@@ -75,10 +75,10 @@ def test_get_game_status_with_rating():
             logger.info(f"评分数量: {rating_count}")
 
             # 判断是否满足筛选条件
-            if status == "已结束" and rating_count >= 100000:
-                logger.info("✓ 满足生成视频条件（已结束且评分>=10万）")
+            if status == "已结束" and rating_count >= 30000:
+                logger.info("✓ 满足生成视频条件（已结束且评分>=3万）")
             elif status == "已结束":
-                logger.info(f"✗ 比赛已结束但评分数量不足（{rating_count} < 100000）")
+                logger.info(f"✗ 比赛已结束但评分数量不足（{rating_count} < 30000）")
             else:
                 logger.info(f"⏳ 比赛尚未结束（状态: {status}）")
         else:
@@ -103,7 +103,7 @@ def test_rating_filter_integration():
     if not tasks:
         logger.warning("没有创建任何任务，可能是因为：")
         logger.warning("1. 今天没有比赛")
-        logger.warning("2. 所有比赛都不满足评分条件（已结束但评分<10万）")
+        logger.warning("2. 所有比赛都不满足评分条件（已结束但评分<3万）")
         return
 
     # 统计各状态的任务数量

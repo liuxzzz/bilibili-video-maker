@@ -6,5 +6,6 @@
 """
 
 from .runner import NewModeRunner
+from .content_fetcher import NewContentFetcher
 
-__all__ = ["NewModeRunner"]
+__all__ = ["NewModeRunner", "NewContentFetcher"]

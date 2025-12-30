@@ -36,12 +36,21 @@ class VideoPublisher:
         初始化视频发布器
 
         Args:
-            sessdata: B站登录凭证 sessdata（从环境变量 BILIBILI_SESSDATA 读取或直接传入）
-            bili_jct: B站登录凭证 bili_jct（从环境变量 BILIBILI_BILI_JCT 读取或直接传入）
-            buvid3: B站登录凭证 buvid3（从环境变量 BILIBILI_BVID3 读取或直接传入，可选）
+            sessdata: B站登录凭证 sessdata（优先使用传入值，否则从Chrome cookies或环境变量读取）
+            bili_jct: B站登录凭证 bili_jct（优先使用传入值，否则从Chrome cookies或环境变量读取）
         """
-        self.sessdata = sessdata or os.getenv("BILIBILI_SESSDATA")
-        self.bili_jct = bili_jct or os.getenv("BILIBILI_BILI_JCT")
+        # 如果未传入，尝试从Chrome cookies获取，如果失败则从环境变量读取
+        if not sessdata:
+            from src.utils import get_bilibili_sessdata
+
+            sessdata = get_bilibili_sessdata()
+        if not bili_jct:
+            from src.utils import get_bilibili_bili_jct
+
+            bili_jct = get_bilibili_bili_jct()
+
+        self.sessdata = sessdata
+        self.bili_jct = bili_jct
         logger.debug(
             f"凭证初始化: sessdata={'已设置' if self.sessdata else 'None'}, bili_jct={'已设置' if self.bili_jct else 'None'}"
         )

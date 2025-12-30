@@ -21,10 +21,20 @@ class TaskScheduler:
     """任务调度器 - 系统的核心管家"""
 
     def __init__(self):
+        # 在初始化前获取B站登录凭证（从Chrome cookies）
+        logger.info("正在从Chrome cookies获取B站登录凭证...")
+        from src.utils import get_bilibili_credentials_from_chrome
+
+        sessdata, bili_jct = get_bilibili_credentials_from_chrome()
+        if sessdata and bili_jct:
+            logger.info("成功从Chrome cookies获取B站登录凭证")
+        else:
+            logger.warning("未能从Chrome cookies获取完整凭证，将使用环境变量或默认值")
+
         self.game_fetcher = GameFetcher()
         self.content_acquirer = ContentAcquirer(headless=False)
         self.video_maker = VideoMaker()
-        self.video_publisher = VideoPublisher()
+        self.video_publisher = VideoPublisher(sessdata=sessdata, bili_jct=bili_jct)
         self.task_store = TaskStore()  # 使用持久化存储
         logger.info("任务调度器初始化完成")
 
@@ -89,14 +99,14 @@ class TaskScheduler:
 
                 if game_status == "已结束":
                     # 比赛已结束，检查评分数量
-                    if rating_count >= 100000:
+                    if rating_count >= 30000:
                         logger.info(
-                            f"比赛 {match_id} 已结束且评分数量({rating_count})>=10万，任务可以执行"
+                            f"比赛 {match_id} 已结束且评分数量({rating_count})>=3万，任务可以执行"
                         )
                         task.status = TaskStatus.PENDING
                     else:
                         logger.info(
-                            f"比赛 {match_id} 已结束但评分数量({rating_count})<10万，跳过任务创建"
+                            f"比赛 {match_id} 已结束但评分数量({rating_count})<3万，跳过任务创建"
                         )
                         # 不保存任务，直接跳过
                         continue
@@ -317,14 +327,14 @@ class TaskScheduler:
 
         if game_status == "已结束":
             # 比赛已结束，检查评分数量
-            if rating_count >= 100000:
+            if rating_count >= 30000:
                 logger.info(
-                    f"比赛 {match_id} 已结束且评分数量({rating_count})>=10万，任务转为待执行状态"
+                    f"比赛 {match_id} 已结束且评分数量({rating_count})>=3万，任务转为待执行状态"
                 )
                 self.task_store.update_task_status(task.task_id, TaskStatus.PENDING)
                 return True
             else:
-                logger.info(f"比赛 {match_id} 已结束但评分数量({rating_count})<10万，继续等待")
+                logger.info(f"比赛 {match_id} 已结束但评分数量({rating_count})<3万，继续等待")
                 # 设置下次检查时间（1小时后），继续等待评分数量增长
                 next_check = datetime.now() + timedelta(hours=1)
                 task.config["game_status"] = game_status
